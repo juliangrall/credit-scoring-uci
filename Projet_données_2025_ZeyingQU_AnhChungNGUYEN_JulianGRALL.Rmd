@@ -1,0 +1,959 @@
+---
+title: "Projet données 2025"
+author: "Zeying QU, Chung-Anh NGUYEN, Julian GRALL"
+date: "2025-11-02"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(repos = c(CRAN = "https://cran.r-project.org"))
+if (!require(tinytex)) install.packages("tinytex")
+if (!require(tidyverse)) install.packages("tidyverse")
+library(tidyverse)
+library(readr)
+```
+
+# Credit Scoring project
+
+## Présentation des données et nettoyage
+
+### Présentation du jeu de données
+
+Le jeu de données utilisé dans cette étude provient de la base publique *Default of Credit Card Clients Dataset* (UCI / Kaggle). Il contient des informations sur 30 000 clients de cartes de crédit à Taïwan, collectées en 2025, dans le but de prédire le risque de défaut de paiement pour le mois suivant.
+
+Chaque observation correspond à un client, et les variables décrivent ses caractéristiques démographiques, son historique de paiement, ses montants de factures et ses paiements récents.
+
+La variable cible (`default.payment.next.month`) prend la valeur **1** si le client n'a pas remboursé son crédit à la date prévue, et **0** sinon.
+
+```{r}
+data <- readr::read_csv("UCI_Credit_Card_ZeyingQU_AnhChungNGUYEN_JulianGRALL.csv")
+
+#Aperçu des premières lignes
+head(data)
+
+#Dimensions du dataset
+dim(data)
+
+```
+
+Le jeu de données comporte 30 000 observations de 25 variables.
+
+| Variable | Description |
+|--------------------------------|----------------------------------------|
+| **ID** | Identifiant de chaque client |
+| **LIMIT_BAL** | Montant du crédit accordé en dollars taïwanais (NT\$), incluant le crédit individuel et familial/supplémentaire |
+| **SEX** | Sexe (1 = homme, 2 = femme) |
+| **EDUCATION** | Niveau d’éducation (1 = école supérieure, 2 = université, 3 = lycée, 4 = autres, 5 = inconnu, 6 = inconnu) |
+| **MARRIAGE** | Statut marital (1 = marié, 2 = célibataire, 3 = autres) |
+| **AGE** | Âge en années |
+| **PAY_0** | Statut de remboursement en septembre 2005 (-1 = paiement effectué à temps, 1 = retard d’un mois, 2 = retard de deux mois, …, 8 = retard de huit mois, 9 = retard de neuf mois ou plus) |
+| **PAY_2** | Statut de remboursement en août 2005 (échelle identique à ci-dessus) |
+| **PAY_3** | Statut de remboursement en juillet 2005 (échelle identique à ci-dessus) |
+| **PAY_4** | Statut de remboursement en juin 2005 (échelle identique à ci-dessus) |
+| **PAY_5** | Statut de remboursement en mai 2005 (échelle identique à ci-dessus) |
+| **PAY_6** | Statut de remboursement en avril 2005 (échelle identique à ci-dessus) |
+| **BILL_AMT1** | Montant de la facture en septembre 2005 (NT\$) |
+| **BILL_AMT2** | Montant de la facture en août 2005 (NT\$) |
+| **BILL_AMT3** | Montant de la facture en juillet 2005 (NT\$) |
+| **BILL_AMT4** | Montant de la facture en juin 2005 (NT\$) |
+| **BILL_AMT5** | Montant de la facture en mai 2005 (NT\$) |
+| **BILL_AMT6** | Montant de la facture en avril 2005 (NT\$) |
+| **PAY_AMT1** | Montant du paiement précédent en septembre 2005 (NT\$) |
+| **PAY_AMT2** | Montant du paiement précédent en août 2005 (NT\$) |
+| **PAY_AMT3** | Montant du paiement précédent en juillet 2005 (NT\$) |
+| **PAY_AMT4** | Montant du paiement précédent en juin 2005 (NT\$) |
+| **PAY_AMT5** | Montant du paiement précédent en mai 2005 (NT\$) |
+| **PAY_AMT6** | Montant du paiement précédent en avril 2005 (NT\$) |
+| **default.payment.next.month** | Défaut de paiement le mois suivant (1 = oui, 0 = non) |
+
+```{r}
+table(data$default.payment.next.month)
+prop.table(table(data$default.payment.next.month))
+```
+
+On observe que 22% des clients sont en défaut de paiement, ce qui indique un déséquilibre de classes à prendre en compte lors de la modélisation.
+
+### Nettoyage du jeu de données
+
+#### Vérifier les valeurs manquantes
+
+```{r}
+colSums(is.na(data))
+```
+
+On remarque qu'il n'y a aucune valeur manquante
+
+#### Supprimer la colonne inutile
+
+```{r}
+data <- data %>% select(-ID)
+```
+
+La colonne `ID` ne contient qu'un identifiant, donc elle n'apporte aucune information à la modélisation.
+
+#### Les valeurs incohérentes
+
+Maintenant corrigeons les valeurs incohérentes.
+
+```{r}
+table(data$EDUCATION)
+```
+
+On remarque que dans la variable `EDUCATION` les valeurs **5** et **6** veulent dire la même chose. De plus elle peut prendre la valeur **0** ce qui semble être une erreur. Regroupons les dans **5**.
+
+```{r}
+data$EDUCATION[data$EDUCATION == 0 | data$EDUCATION == 6] <- 5
+```
+
+```{r}
+unique(data$MARRIAGE)
+```
+
+La variable `MARRIAGE` peut prendre la valeur **0** ce qui semble être une erreur, mettons les dans **3** (autres).
+
+```{r}
+data$MARRIAGE[data$MARRIAGE == 0] <- 3
+```
+
+#### Les types de variables
+
+Vérifions les types de variables
+
+```{r}
+str(data)
+```
+
+On remarque que toutes les variables sont en *numeric* alors que certaines d'entre elles devraient être des *factors*, comme `MARRIAGE`, `EDUCATION`, `SEX`...
+
+Convertissons les variables qualitatives en *factors*
+
+```{r}
+data$SEX <- as.factor(data$SEX)
+data$EDUCATION <- as.factor(data$EDUCATION)
+data$MARRIAGE <- as.factor(data$MARRIAGE)
+data$default.payment.next.month <- as.factor(data$default.payment.next.month)
+```
+
+Ce sera utile pour la régression logistique et d'autres modèles, pour que R comprenne que ces variables ne sont pas continues.
+
+Voilà notre jeu de données final :
+
+```{r}
+head(data)
+summary(data)
+```
+
+## Première vu du jeu données
+
+### 1. Répartition des limites de crédit
+
+```{r}
+ggplot(data, aes(LIMIT_BAL, fill = default.payment.next.month)) +
+  geom_histogram(bins = 40, alpha = 0.6, position = "identity") +
+  labs(
+    title = "Distribution de LIMIT_BAL par classe",
+    x = "Crédit accordé (NT$)",
+    y = "Nombre de clients"
+  ) +
+  theme_minimal()
+```
+
+Nous pouvons observer que la majorité des limites de crédit des clients se concentrent dans une fourchette comprise entre 0 et 250 000 NT ; dans cette fourchette, le nombre de clients non défaillants dépasse largement celui des clients défaillants. Lorsque les limites de crédit dépassent 500 000 NT, il n'y a pratiquement aucun client défaillant.
+
+Les clients disposant de limites de crédit plus élevées sont plus susceptibles de rembourser dans les délais, tandis que ceux dont les limites sont plus faibles présentent un risque de défaut de paiement plus important.
+
+### 2. Répartition par âge
+
+```{r}
+ggplot(data, aes(AGE, fill = default.payment.next.month)) +
+  geom_histogram(bins = 30, alpha = 0.6, position = "identity") +
+  labs(title = "Âge par classe", x = "Âge", y = "Nombre de clients") +
+  theme_minimal()
+
+```
+
+Nous pouvons observer que les clients détenteurs d'une carte de crédit sont principalement concentrés dans la tranche d'âge des 20 à 40 ans ; les clients plus jeunes (20 ans) présentent un taux de défaut de paiement plus élevé ; avec l'âge, le nombre de défaillants diminue sensiblement ; au-delà de 50 ans, les clients défaillants et non défaillants deviennent relativement rares.
+
+Les jeunes sont plus enclins à ne pas rembourser leurs dettes de carte de crédit, tandis que les personnes plus âgées font preuve d'une plus grande stabilité dans leurs remboursements.
+
+### 3. Analyse des corrélations entre les variables numériques
+
+```{r}
+num_vars <- select_if(data, is.numeric)
+cor(num_vars, use = "pairwise.complete.obs")[1:6, 1:6]
+```
+
+PAY_0, PAY_2 et PAY_3 présentent un degré élevé de corrélation, ce qui indique que les habitudes de remboursement des clients restent constantes d'un mois à l'autre.
+
+LIMIT_BAL présente une corrélation négative avec le paiement, ce qui signifie que des limites de crédit plus élevées sont corrélées à une probabilité plus faible de retards de paiement.
+
+L'âge présente une faible corrélation avec les autres variables et n'aide que de manière limitée à prédire les défauts de paiement.
+
+## Première analyse du jeu de données - Régression logistique
+
+Introduction théorique : La régression logistique est un modèle statistique permettant d’estimer la probabilité qu’un événement binaire se produise (ici : défaut de paiement = 1).
+
+Contrairement à la régression linéaire, elle modélise la relation entre les variables explicatives et la log-odds de l’événement. La fonction logit garantit que les probabilités prédites sont comprises entre 0 et 1.
+
+### 1. Séparation du jeu de données
+
+```{r}
+set.seed(123)
+n <- nrow(data)
+id_train <- sample(1:n, size = 0.7 * n)
+train <- data[id_train, ]
+test <- data[-id_train, ]
+cat("Proportion de défaut dans train:", mean(train$default.payment.next.month == "1"), "\n")
+cat("Proportion de défaut dans test:", mean(test$default.payment.next.month == "1"), "\n")
+```
+
+### 2. Modèle logistique complet
+
+```{r}
+modele_complet <- glm(default.payment.next.month ~ ., data = train, family = binomial)
+summary(modele_complet)
+```
+
+Nous utilisons *glm()* avec *family = binomial* car la variable réponse `default.payment.next.month` est binaire (0 = pas de défaut, 1 = défaut).
+
+### 3. Sélection de variables - Critère AIC
+
+Sélection backward (on supprime les variables les moins pertinentes)
+
+```{r}
+modele_reduit <- step(modele_complet, direction = "backward", trace = FALSE)
+summary(modele_reduit)
+```
+
+Comparaison des AIC
+
+```{r}
+AIC(modele_complet, modele_reduit)
+```
+
+Le modèle réduit obtenu par sélection automatique *step()* a un AIC inférieur au modèle complet, ce qui indique qu’un modèle plus simple ajuste les données tout aussi bien. Les variables supprimées apportaient peu d’information pour expliquer le défaut de paiement, et leur retrait améliore la parcimonie et l’interprétabilité du modèle.
+
+### 4. Interprétation des coefficients
+
+Odds ratios (exp des coefficients)
+
+Dans une régression logistique, les coefficients sont sur l’échelle du logit et difficiles à interpréter directement. En exponentiant les coefficients, on obtient des multiplicateurs de chances, qui indiquent combien la probabilité de l’événement augmente ou diminue pour une unité de variation de la variable.
+
+```{r}
+odd_ratios <- exp(coef(modele_reduit))
+odd_ratios
+odd_ratios[odd_ratios > 1.1 | odd_ratios < 0.9]
+```
+
+### 5. Évaluation sur les données test
+
+```{r}
+proba_test <- predict(modele_reduit, newdata = test, type = "response")
+head(proba_test)
+```
+
+Dans un premier temps, nous utilisons un seuil de classification de 0,5 car c’est le seuil standard pour transformer les probabilités prédites par une régression logistique en prédictions binaires. Concrètement, si la probabilité prédite d’un défaut est supérieure à 0,5, le client est classé comme défaillant, sinon comme non-défaillant. Ce seuil permet une première évaluation simple et équilibrée du modèle avant d’envisager un ajustement pour optimiser la sensibilité ou la précision selon les besoins.
+
+```{r}
+pred_test <- ifelse(proba_test > 0.5, 1, 0) 
+table(Pred = pred_test, Réel = test$default.payment.next.month)
+```
+
+Cette matrice permet de visualiser :
+
+Vrais négatifs (6824) : clients correctement prédits comme n’ayant pas de défaut
+
+Faux positifs (219) : clients prédits en défaut alors qu’ils ne le sont pas
+
+Faux négatifs (1467) : clients prédits sans défaut alors qu’ils ont réellement un défaut
+
+Vrais positifs (490) : clients correctement prédits en défaut
+
+On remarque que le modèle détecte correctement la majorité des clients sans défaut, mais qu’il rate un nombre non négligeable de défauts (faux négatifs). Cette analyse souligne l’importance de choisir un seuil adapté et éventuellement de compléter l’évaluation par des métriques comme la sensibilité, la précision ou la courbe ROC.
+
+Taux de bonnes classifications
+
+```{r}
+mean(pred_test == as.numeric(test$default.payment.next.month) - 1)
+```
+
+Le modèle atteint un taux de bonnes classifications de 80 %. Cependant, comme les clients défaillants sont moins nombreux que les non-défaillants, ce chiffre peut être trompeur. Il est donc important de compléter l’évaluation avec des métriques comme la sensibilité ou la précision pour mieux apprécier la capacité du modèle à détecter les défauts.
+
+### 6. Courbe ROC et AUC
+
+```{r, include=FALSE}
+install.packages("ROCR")
+library(ROCR)
+install.packages("pROC") 
+library(pROC)
+```
+
+```{r}
+pred <- prediction(proba_test, test$default.payment.next.month)
+perf <- performance(pred, "tpr", "fpr")
+
+plot(perf, col = "blue", lwd = 2, main = "Courbe ROC - Régression Logistique")
+abline(a = 0, b = 1, lty = 2, col = "gray")
+```
+
+```{r}
+roc_obj <- roc(test$default.payment.next.month, proba_test) 
+auc(roc_obj)
+```
+
+Le modèle présente une AUC de 0,7133, ce qui indique une capacité correcte à distinguer les clients défaillants des non-défaillants. Cela montre que le modèle est globalement performant. Cependant, il reste des marges d’amélioration pour mieux détecter les défauts.
+
+### 7. Étude des résidus
+
+Après avoir évalué la capacité discriminante du modèle avec la courbe ROC, on analyse les résidus pour vérifier que le modèle s’ajuste correctement aux données, identifier d’éventuelles observations atypiques et s’assurer que les hypothèses du modèle ne sont pas non respectées.
+
+```{r}
+residus <- residuals(modele_reduit, type = "deviance")
+plot(residus, main = "Résidus du modèle logistique", ylab = "Résidus", xlab = "Observations") 
+abline(h = 0, col = "red")
+```
+
+Les résidus de déviance sont concentrés sur des valeurs extrêmes car la variable réponse est binaire et le dataset est déséquilibré. Cette distribution est normale et n’indique pas un problème du modèle.
+
+### 8. Conclusion
+
+Le modèle logistique permet de modéliser efficacement le risque de défaut.
+
+Les variables liées à l’historique de paiement (PAY_X) et au montant du crédit sont les plus déterminantes. L’AUC autour de 0.7133 indique un bon pouvoir discriminant pour un modèle interprétable et relativement simple.
+
+## Deuxième analyse du jeu de données - Arbre de Décision
+
+### 1. Construction du modèle
+
+```{r, include=FALSE}
+packages <- c('MASS', 'tree', 'e1071', 'caret')
+for(pkg in packages) {
+  if(!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+```
+
+```{r tree_model}
+tree_model <- tree(default.payment.next.month ~ ., data = train)
+summary(tree_model)
+```
+
+### 2. Visualisation de l'arbre
+
+```{r tree_plot, fig.width=12, fig.height=8}
+plot(tree_model)
+text(tree_model, pretty = 0, cex = 0.8)
+title("Arbre de décision complet")
+
+# Affichage de la structure
+print(tree_model$frame)
+```
+
+### 3. Élagage de l'arbre (Pruning)
+
+```{r tree_pruning, fig.width=10, fig.height=6}
+# Validation croisée pour déterminer la taille optimale
+cv_tree <- cv.tree(tree_model, FUN = prune.misclass)
+
+# Visualisation de l'erreur en fonction de la taille
+plot(cv_tree$size, cv_tree$dev, type = "b", 
+     xlab = "Taille de l'arbre", ylab = "Erreur de CV",
+     main = "Validation croisée pour l'élagage")
+
+# Sélection de la taille optimale
+optimal_size <- cv_tree$size[which.min(cv_tree$dev)]
+cat("Taille optimale:", optimal_size, "\n")
+
+# Élagage de l'arbre
+pruned_tree <- prune.misclass(tree_model, best = optimal_size)
+
+# Visualisation de l'arbre élagué
+plot(pruned_tree)
+text(pruned_tree, pretty = 0, cex = 0.8)
+title("Arbre de décision élagué")
+```
+
+### 4. Prédiction et évaluation
+
+```{r tree_prediction}
+# Prédictions sur le test set
+tree_pred <- predict(pruned_tree, newdata = test, type = "class")
+
+# Matrice de confusion
+conf_matrix_tree <- table(Predicted = tree_pred, Actual = test$default.payment.next.month)
+print(conf_matrix_tree)
+
+# Métriques de performance
+accuracy_tree <- sum(diag(conf_matrix_tree)) / sum(conf_matrix_tree)
+precision_tree <- conf_matrix_tree[2,2] / sum(conf_matrix_tree[2,])
+recall_tree <- conf_matrix_tree[2,2] / sum(conf_matrix_tree[,2])
+f1_tree <- 2 * (precision_tree * recall_tree) / (precision_tree + recall_tree)
+
+cat("\n=== Performance de l'Arbre de Décision ===\n")
+cat("Accuracy:", round(accuracy_tree, 4), "\n")
+cat("Precision:", round(precision_tree, 4), "\n")
+cat("Recall:", round(recall_tree, 4), "\n")
+cat("F1-Score:", round(f1_tree, 4), "\n")
+
+# Courbe ROC
+tree_prob <- predict(pruned_tree, newdata = test, type = "vector")[,2]
+roc_tree <- roc(test$default.payment.next.month, tree_prob)
+cat("AUC:", round(auc(roc_tree), 4), "\n")
+```
+
+### 5. Structure et interprétation de l’arbre de décision
+
+-   L’arbre utilise seulement **3 variables clés** : `PAY_0`, `PAY_2`, `PAY_AMT3`.
+-   Les retards de paiement récents sont les prédicteurs les plus importants → le comportement des derniers mois domine.
+-   Le montant payé (PAY_AMT3) joue un rôle secondaire.
+-   Les autres variables (démographie, montants facturés, crédit accordé…) ne sont pas utilisées → faible pouvoir prédictif.
+-   L’arbre reste simple (**4 feuilles**) : très interprétable, peu de risque de surapprentissage mais risque d’underfitting.
+
+### 6. Performance du modèle et limites
+
+-   Accuracy : **82%**, meilleure que le baseline (78%).
+-   Precision : **68%** → les alertes de défaut sont relativement fiables.
+-   **Recall très faible : 32%** → environ 2/3 des défauts réels ne sont pas détectés.
+-   La faible performance sur la classe minoritaire s’explique par le **déséquilibre des classes** (22% défaut).
+-   La matrice de confusion montre beaucoup de **faux négatifs**, entraînant un risque financier significatif.
+
+## Troisième analyse du jeu de données - Analyse Discriminante Linéaire (LDA)
+
+### 1. Construction du modèle LDA
+
+```{r lda_model}
+# Préparation des données (conversion des facteurs en numériques si nécessaire)
+train_lda <- train
+test_lda <- test
+
+# Entraînement du modèle LDA
+lda_model <- lda(default.payment.next.month ~ ., data = train_lda)
+print(lda_model)
+```
+
+### 2. Analyse des coefficients
+
+```{r lda_analysis}
+# Coefficients des discriminants linéaires
+cat("\n=== Coefficients des discriminants linéaires ===\n")
+print(lda_model$scaling)
+
+# Moyennes par groupe
+cat("\n=== Moyennes des groupes ===\n")
+print(lda_model$means)
+
+# Probabilités a priori
+cat("\n=== Probabilités a priori ===\n")
+print(lda_model$prior)
+```
+
+### 3. Prédiction et évaluation LDA
+
+```{r lda_prediction}
+# Prédictions sur le test set
+lda_pred <- predict(lda_model, newdata = test_lda)
+
+# Matrice de confusion
+conf_matrix_lda <- table(Predicted = lda_pred$class, Actual = test_lda$default.payment.next.month)
+print(conf_matrix_lda)
+
+# Métriques de performance
+accuracy_lda <- sum(diag(conf_matrix_lda)) / sum(conf_matrix_lda)
+precision_lda <- conf_matrix_lda[2,2] / sum(conf_matrix_lda[2,])
+recall_lda <- conf_matrix_lda[2,2] / sum(conf_matrix_lda[,2])
+f1_lda <- 2 * (precision_lda * recall_lda) / (precision_lda + recall_lda)
+
+cat("\n=== Performance du LDA ===\n")
+cat("Accuracy:", round(accuracy_lda, 4), "\n")
+cat("Precision:", round(precision_lda, 4), "\n")
+cat("Recall:", round(recall_lda, 4), "\n")
+cat("F1-Score:", round(f1_lda, 4), "\n")
+
+# Courbe ROC
+roc_lda <- roc(test_lda$default.payment.next.month, lda_pred$posterior[,2])
+cat("AUC:", round(auc(roc_lda), 4), "\n")
+```
+
+### 4. Visualisation des résultats LDA
+
+```{r lda_visualization, fig.width=10, fig.height=6}
+# Distribution des scores discriminants
+lda_values <- data.frame(
+  LD1 = lda_pred$x[,1],
+  Classe = test_lda$default.payment.next.month
+)
+
+ggplot(lda_values, aes(x = LD1, fill = Classe)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribution des scores discriminants par classe",
+       x = "LD1 (Premier discriminant linéaire)",
+       y = "Densité") +
+  theme_minimal()
+```
+
+### 5. Analyse du modèle LDA
+
+**1. Interprétation du modèle**\
+Le LDA montre que les variables les plus discriminantes sont les retards de paiement (`PAY_0`, `PAY_2`, etc.). Les montants facturés et remboursés contribuent très peu. Le modèle construit une frontière linéaire, mais les deux classes restent fortement chevauchées.
+
+**2. Lecture des scores discriminants**\
+La distribution de LD1 montre une séparation partielle : les clients en défaut ont en moyenne un score plus élevé, mais les distributions se superposent largement. Le LDA ne parvient donc pas à séparer nettement les classes.
+
+**3. Performance du modèle**\
+- Accuracy : **81%**\
+- Precision : **69%**\
+- Recall : **27%**\
+- AUC : **0.71**
+
+Le modèle identifie bien les non-défaillants, mais manque la majorité des défauts.
+
+### 6. Conclusion
+
+Le LDA confirme l’importance des retards de paiement mais reste limité : la séparation linéaire est trop faible et le recall trop bas pour un usage efficace en scoring de risque. Des modèles plus flexibles (Random Forest, XGBoost) seraient mieux adaptés.
+
+## Quatrième analyse du jeu de données - Random Forest et SVM
+
+### 1. Random Forest
+
+```{r}
+library(randomForest)
+
+set.seed(123)
+
+# Entraînement du Random Forest
+rf_model <- randomForest(
+  default.payment.next.month ~ .,
+  data = train,
+  ntree = 500,
+  importance = TRUE
+)
+
+print(rf_model)
+
+```
+
+Le Random Forest réduit nettement l’erreur globale (OOB ≈ 18 %) et détecte beaucoup mieux les bons payeurs, avec seulement 5 % d’erreurs dans la classe 0. En revanche, il peine encore à identifier les clients à risque : plus de 62 % des défauts réels sont manqués, ce qui montre que le modèle reste limité pour capter la minorité des défailleurs.
+
+```{r}
+# Importance des variables
+varImpPlot(rf_model, main = "Importance des variables - Random Forest")
+
+# Prédictions
+rf_pred <- predict(rf_model, newdata = test)
+```
+
+Le Random Forest confirme que **PAY_0** est de loin la variable la plus déterminante pour prévoir le défaut, suivie par plusieurs montants de factures (BILL_AMT). Les variables démographiques contribuent très peu, ce qui montre que le comportement de paiement passé pèse beaucoup plus lourd que le profil socio-économique du client.
+
+```{r}
+# Matrice de confusion
+conf_matrix_rf <- table(
+  Predicted = rf_pred,
+  Actual = test$default.payment.next.month
+)
+
+print(conf_matrix_rf)
+
+# Métriques
+accuracy_rf <- sum(diag(conf_matrix_rf)) / sum(conf_matrix_rf)
+precision_rf <- conf_matrix_rf[2,2] / sum(conf_matrix_rf[2,])
+recall_rf <- conf_matrix_rf[2,2] / sum(conf_matrix_rf[,2])
+f1_rf <- 2 * (precision_rf * recall_rf) / (precision_rf + recall_rf)
+
+cat("\n=== Performance du Random Forest ===\n")
+cat("Accuracy:", round(accuracy_rf, 4), "\n")
+cat("Precision:", round(precision_rf, 4), "\n")
+cat("Recall:", round(recall_rf, 4), "\n")
+cat("F1-Score:", round(f1_rf, 4), "\n")
+
+# AUC
+rf_prob <- predict(rf_model, newdata = test, type = "prob")[,2]
+roc_rf <- roc(test$default.payment.next.month, rf_prob)
+
+cat("AUC:", round(auc(roc_rf), 4), "\n")
+```
+
+Le Random Forest améliore légèrement la détection des défauts par rapport à l’arbre simple (recall ≈ 37 % contre 32 %), tout en conservant une bonne précision. L’AUC de 0,76 montre une capacité de discrimination correcte, mais encore insuffisante pour capter une minorité de clients réellement à risque. Le modèle reste donc performant globalement, mais continue à manquer une part importante des défailleurs, ce qui souligne la nécessité de méthodes plus puissantes pour améliorer le recall.
+
+### 2. SVM avec noyau RBF (Radial Basis Function)
+
+```{r svm_rbf}
+# Entraînement du SVM RBF
+svm_rbf <- svm(default.payment.next.month ~ ., 
+               data = train, 
+               kernel = "radial",
+               cost = 1,
+               gamma = 0.01,
+               probability = TRUE)
+
+print(summary(svm_rbf))
+
+# Prédictions
+svm_rbf_pred <- predict(svm_rbf, newdata = test)
+
+# Matrice de confusion
+conf_matrix_svm_rbf <- table(Predicted = svm_rbf_pred, Actual = test$default.payment.next.month)
+print(conf_matrix_svm_rbf)
+
+# Métriques
+accuracy_svm_rbf <- sum(diag(conf_matrix_svm_rbf)) / sum(conf_matrix_svm_rbf)
+precision_svm_rbf <- conf_matrix_svm_rbf[2,2] / sum(conf_matrix_svm_rbf[2,])
+recall_svm_rbf <- conf_matrix_svm_rbf[2,2] / sum(conf_matrix_svm_rbf[,2])
+f1_svm_rbf <- 2 * (precision_svm_rbf * recall_svm_rbf) / (precision_svm_rbf + recall_svm_rbf)
+
+cat("\n=== Performance du SVM RBF ===\n")
+cat("Accuracy:", round(accuracy_svm_rbf, 4), "\n")
+cat("Precision:", round(precision_svm_rbf, 4), "\n")
+cat("Recall:", round(recall_svm_rbf, 4), "\n")
+cat("F1-Score:", round(f1_svm_rbf, 4), "\n")
+```
+
+Le SVM RBF obtient une accuracy solide (82 %) et une bonne précision, mais son recall reste faible (≈ 32 %), identique à celui de l’arbre de décision. Cela montre que, sans réglage fin des hyperparamètres, le modèle reste conservateur et détecte mal les clients vraiment à risque. Malgré sa capacité à capturer des relations non linéaires, ce SVM basique ne surpasse pas le Random Forest et nécessite un tuning plus poussé (cost, gamma, pondération des classes) pour réellement améliorer la détection des défauts.
+
+### 3. Comparaison des modèles
+
+```{r model_comparison}
+# Tableau récapitulatif
+results <- data.frame(
+  Model = c("Arbre de Décision", "SVM RBF", "Random Forest"),
+  Accuracy = c(accuracy_tree, accuracy_svm_rbf, accuracy_rf),
+  Precision = c(precision_tree, precision_svm_rbf, precision_rf),
+  Recall = c(recall_tree, recall_svm_rbf, recall_rf),
+  F1_Score = c(f1_tree, f1_svm_rbf, f1_rf)
+)
+
+
+print(results)
+
+# Visualisation comparative
+results_long <- results %>%
+  pivot_longer(cols = -Model, names_to = "Metric", values_to = "Value")
+
+ggplot(results_long, aes(x = Model, y = Value, fill = Metric)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Comparaison des performances des modèles",
+       y = "Score",
+       x = "Modèle") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_brewer(palette = "Set2")
+```
+
+Les trois modèles affichent une accuracy similaire autour de 82 %, mais ils diffèrent sur la détection des défauts. Le Random Forest présente le meilleur **recall** et le meilleur **F1-score**, ce qui en fait le modèle le plus efficace pour identifier les clients à risque. L’arbre de décision et le SVM RBF restent plus précis mais manquent davantage de défaillants.
+
+### 4. Courbes ROC comparatives
+
+```{r roc_comparison, fig.width=10, fig.height=8}
+# Calcul des probabilités pour les SVM
+svm_rbf_prob <- attr(predict(svm_rbf, newdata = test, probability = TRUE), "probabilities")[,2]
+
+# Création des objets ROC
+roc_svm_rbf <- roc(test$default.payment.next.month, svm_rbf_prob)
+roc_rf <- roc(test$default.payment.next.month, rf_prob)
+roc_tree <- roc(test$default.payment.next.month, tree_prob)
+
+# Plot
+plot(roc_tree,
+     col = "blue",
+     lwd = 2,
+     main = "Courbes ROC - Comparaison des modèles")
+
+plot(roc_svm_rbf,
+     col = "purple",
+     lwd = 2,
+     add = TRUE)
+
+plot(roc_rf,
+     col = "darkorange",
+     lwd = 2,
+     add = TRUE)
+
+legend(
+  "bottomright",
+  legend = c(
+    paste("Arbre (AUC =", round(auc(roc_tree), 3), ")"),
+    paste("SVM RBF (AUC =", round(auc(roc_svm_rbf), 3), ")"),
+    paste("Random Forest (AUC =", round(auc(roc_rf), 3), ")")
+  ),
+  col = c("blue", "purple", "darkorange"),
+  lwd = 2
+)
+```
+
+Les courbes ROC montrent clairement que le **Random Forest** est le modèle le plus performant, avec une AUC de **0.761**, indiquant une meilleure capacité à distinguer les défaillants des non-défaillants.\
+
+L’**arbre de décision** obtient une performance correcte (AUC = 0.733), mais reste moins flexible.\
+
+Le **SVM RBF** est le moins performant (AUC = 0.703), preuve qu’il capture moins bien la structure des données sans tuning avancé.\
+
+Dans l’ensemble, tous les modèles dépassent la ligne aléatoire, confirmant que le défaut est prédictible.\
+
+Le Random Forest constitue le meilleur compromis pour un modèle de scoring robuste.
+
+### 5. Conlusion
+
+Nos analyses montrent que les **retards de paiement (PAY_0, PAY_2)** sont de loin les facteurs les plus prédictifs du défaut, confirmant qu’ils jouent un rôle central dans le risque client.\
+
+Les modèles testés convergent vers la même idée : plus le client a été en retard récemment, plus la probabilité de défaut augmente fortement.\
+
+Parmi les méthodes explorées, le **Random Forest** offre les performances les plus solides (AUC = 0.761), dépassant l’arbre et le SVM.\
+
+Le faible recall global illustre cependant la difficulté du jeu de données déséquilibré.
+
+## Cinquième analyse du jeu de données - LASSO
+
+```{r, include=FALSE}
+install.packages("glmnet")
+library(yardstick)
+library(tidymodels)
+library(tune)
+```
+
+```{r}
+folds <- vfold_cv(train, v = 5, strata = default.payment.next.month)
+rec_commune <- recipe(default.payment.next.month ~ ., data = train) %>%
+  step_zv(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_dummy(all_nominal_predictors())
+
+metric_auc <- metric_set(
+  metric_tweak("roc_auc", roc_auc, event_level = "second")
+)
+
+mod_lasso <- logistic_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine("glmnet")
+
+wf_lasso <- workflow() %>% 
+  add_recipe(rec_commune) %>%  
+  add_model(mod_lasso)
+
+res_lasso <- tune_grid(
+  wf_lasso,
+  resamples = folds,
+  grid = 20,                           
+  metrics = metric_set(roc_auc)        
+)
+
+best_lasso <- select_best(res_lasso, metric = "roc_auc")
+
+final_wf  <- finalize_workflow(wf_lasso, best_lasso)
+fit_final <- fit(final_wf, data = train)
+
+p <- predict(fit_final, test, type = "prob")$.pred_0
+roc_auc_vec(test$default.payment.next.month, p)  
+
+```
+
+L'AUC pour le modèle de régression logistique LASSO est de 0,713.
+
+Les performances prédictives des deux modèles sont remarquablement similaires, les différences étant négligeables. LASSO permet une sélection automatique des variables, ce qui donne un modèle plus concis et plus facile à interpréter. Il est particulièrement adapté aux scénarios impliquant de nombreuses caractéristiques ou présentant une multicolinéarité.
+
+```{r, include=FALSE}
+library(Rmixmod)
+```
+
+```{r}
+num_data <- data %>% 
+  select_if(is.numeric) %>%
+  as.data.frame()
+
+num_scaled <- scale(num_data)
+num_scaled <- as.data.frame(num_scaled)
+
+
+set.seed(123)
+km3 <- kmeans(num_scaled, centers = 3, nstart = 50)
+
+
+data$cluster_km3 <- km3$cluster
+
+y <- as.numeric(as.character(data$default.payment.next.month))
+
+risk_km3 <- tapply(y, data$cluster_km3, mean)
+risk_km3
+
+```
+
+```{r}
+df_risk <- data.frame(
+  cluster = factor(names(risk_km3)),
+  risque = as.numeric(risk_km3)
+)
+
+ggplot(df_risk, aes(x = cluster, y = risque)) +
+  geom_bar(stat="identity", fill="steelblue") +
+  labs(title="Taux de défaut par cluster (k-means)",
+       x="Cluster", y="Risque de défaut") +
+  theme_minimal()
+```
+
+Après avoir appliqué l'algorithme k-means pour regrouper les variables numériques au sein de l'ensemble de données, les taux de défaut moyens observés dans les trois groupes révèlent une distinction claire entre les niveaux de risque des différents segments de clientèle :
+
+Cluster 1 – Risque moyen (≈ 0.18)
+
+Ce groupe présente un taux de défaut légèrement inférieur à la moyenne générale (\~22%). Il s’agit probablement de clients avec un comportement financier relativement stable, mais sans caractéristiques particulièrement favorables.
+
+Cluster 2 – Segment le plus sûr (≈ 0.146)
+
+Ce cluster correspond au groupe avec le risque de défaut le plus faible. Les clients de ce segment ont probablement :un meilleur historique de paiement,des montants dus plus faibles,ou une utilisation plus régulière du crédit.Ce cluster représente la population la plus solvable selon les variables utilisées.
+
+Cluster 3 – Segment le plus risqué (≈ 0.29)
+
+Ce cluster affiche un taux de défaut nettement supérieur à la moyenne. Les individus de ce groupe constituent un profil risqué, ce qui peut refléter :des retards de paiement plus fréquents,des limites de crédit plus élevées,des soldes de facturation importants.
+
+**Nous constatons que les trois séries de valeurs sont assez similaires, sans disparité significative entre elles.**
+
+Les trois clusters obtenus par k-means présentent des taux de défaut relativement proches (entre 14% et 27%). Cela est attendu, car le clustering est réalisé en mode non supervisé, sans utiliser la variable cible (default = 0/1).
+
+Ainsi, les groupes sont construits en fonction des comportements financiers (montants facturés, paiements, limites de crédit, etc.) et non directement en fonction du risque de défaut.
+
+Le dataset de crédit étant fortement bruité et les corrélations avec la variable de défaut relativement faibles, la séparation naturelle entre les groupes de risque reste modérée mais néanmoins présente : un cluster présente un risque faible (\~14%), un cluster intermédiaire (\~18%) et un cluster plus risqué (\~29%).
+
+## Conclusion
+
+Dans cette section, nous allons comparer la performance de tous les modèles que nous avons construits pour prédire le défaut de paiement des clients. Pour chaque modèle, nous calculerons les métriques suivantes :
+
+AUC : mesure la capacité du modèle à distinguer les clients défaillants des clients non défaillants.
+
+Accuracy : proportion globale de bonnes prédictions.
+
+Sensitivity : capacité à détecter correctement les clients défaillants (vrais positifs).
+
+Specificity : capacité à détecter correctement les clients non défaillants (vrais négatifs).
+
+Nous utiliserons pour cela une fonction rslt_mdl_all() adaptée à différents types de modèles (glm, tree, randomForest, LDA, SVM, ou workflow tidymodels). Ensuite, nous regrouperons les résultats dans un tableau pour comparer facilement tous les modèles.
+
+```{r}
+rslt_mdl <- function(modele){
+  proba_test <- predict(modele, newdata = test, type = "response")
+  target <- test$default.payment.next.month
+  
+  # AUC
+  roc_obj <- roc(target, proba_test, quiet = TRUE)
+  auc_value <- auc(roc_obj)
+  
+  # Accuracy
+  accuracy <- mean(ifelse(proba_test > 0.5, 1, 0) == target)
+  
+  # Matrice de confusion
+  conf_mat <- confusionMatrix(factor(ifelse(proba_test > 0.5, 1, 0)), factor(target))
+  sensitivity <- conf_mat$byClass["Sensitivity"]
+  specificity <- conf_mat$byClass["Specificity"]
+
+  # Résultat
+  results <- data.frame(
+    AUC = auc_value,
+    Accuracy = accuracy,
+    Sensitivity = sensitivity,
+    Specificity = specificity
+  )
+  
+  return(results)
+}
+
+
+rslt_mdl_all <- function(modele, test, target_col = "default.payment.next.month", threshold = 0.5) {
+  
+  # Extraire les probabilités selon le type de modèle
+  if ("glm" %in% class(modele)) {
+    # glm classique
+    proba_test <- predict(modele, newdata = test, type = "response")
+    
+  } else if ("tree" %in% class(modele)) {
+    # tree() ou pruned_tree
+    proba_test <- predict(modele, newdata = test, type = "vector")[, "1"]
+    
+  } else if ("lda" %in% class(modele)) {
+    # LDA
+    proba_test <- predict(modele, newdata = test)$posterior[, "1"]
+    
+  } else if ("randomForest" %in% class(modele)) {
+    # randomForest
+    proba_test <- predict(modele, newdata = test, type = "prob")[, "1"]
+    
+  } else if ("svm" %in% class(modele)) {
+    # SVM avec probabilité activée
+    proba_test <- attr(predict(modele, newdata = test, probability = TRUE), "probabilities")[, "1"]
+    
+  } else if ("workflow" %in% class(modele)) {
+    # tidymodels workflow (glmnet, LASSO)
+    proba_test <- predict(modele, test, type = "prob") %>% dplyr::pull(".pred_1")
+    
+  } else {
+    stop("Type de modèle non supporté")
+  }
+  
+  target <- test[[target_col]]
+  
+  # Calcul AUC
+  roc_obj <- roc(target, proba_test, quiet = TRUE)
+  auc_value <- auc(roc_obj)
+  
+  # Prédictions binaires
+  pred_class <- ifelse(proba_test > threshold, 1, 0)
+  
+  # Accuracy et matrice de confusion
+  accuracy <- mean(pred_class == target)
+  conf_mat <- confusionMatrix(factor(pred_class), factor(target))
+  sensitivity <- conf_mat$byClass["Sensitivity"]
+  specificity <- conf_mat$byClass["Specificity"]
+  
+  # Résultat
+  results <- data.frame(
+    AUC = auc_value,
+    Accuracy = accuracy,
+    Sensitivity = sensitivity,
+    Specificity = specificity
+  )
+  
+  return(results)
+}
+
+modeles <- list(
+  modele_reduit = modele_reduit,
+  tree_model = tree_model,
+  svm_rbf = svm_rbf,
+  pruned_tree = pruned_tree,
+  lda_model = lda_model,
+  rf_model = rf_model,
+  fit_final = fit_final
+)
+
+results_table <- data.frame()
+names <- c()
+for (nm in names(modeles)) {
+  tmp <- rslt_mdl_all(modeles[[nm]], test)
+  results_table <- rbind(results_table, tmp)
+  names = c(names, nm)
+}
+
+row.names(results_table) = names
+
+results_table
+```
+
+En comparant les métriques de tous les modèles :
+
+*rf_model* (Random Forest) se distingue comme le meilleur modèle global :
+
+`AUC` = 0.7611 -\> meilleure discrimination globale entre clients défaillants et non défaillants.
+
+`Accuracy` = 0.8184 -\> très bonne précision globale.
+
+`Specificity` = 0.3730 -\> détecte mieux les clients non défaillants, donc moins de faux positifs.
+
+`Sensitivity` légèrement plus faible que modele_reduit ou fit_final, mais reste élevée (0.9422).
+
+Les autres modèles :
+
+*modele_reduit* et *fit_final* ont une `Sensitivity` très élevée (\~0.97) mais `Specificity` très faible → beaucoup de faux positifs.
+
+*tree_model* et *pruned_tree* ont de bonnes `AUC` et `Accuracy`, mais `Specificity` plus faible que *rf_model*.
+
+*svm_rbf* et *lda_model* sont globalement moins performants.
+
+Conclusion pratique : pour prédire le défaut de paiement tout en limitant les fausses alertes, le Random Forest (*rf_model*) est le modèle le plus fiable et équilibré.
